@@ -1,35 +1,140 @@
-clone:
-  path: github.com/drone/drone
+---
+kind: pipeline
+type: docker
+name: linux-amd64
 
-build:
-  image: drone/golang:1.5
-  environment:
-    - GO15VENDOREXPERIMENT=1
+platform:
+  arch: amd64
+  os: linux
+
+steps:
+- name: test
+  image: golang:1.13.0
   commands:
-    - make deps gen
-    - make test test_postgres test_mysql
-    - make build build_static deb docs
+  - go test ./...
+  
+- name: build
+  image: golang:1.13.0
+  commands:
+  - sh scripts/build.sh
+  environment:
+    GOARCH: amd64
+    GOOS: linux
 
-compose:
-  postgres:
-    image: postgres:9.4.5
-    environment:
-      - POSTGRES_USER=postgres
-  mysql:
-    image: mysql:5.6.27
-    environment:
-      - MYSQL_DATABASE=test
-      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
-
-publish:
-  docker:
-    username: drone
-    password: $$DOCKER_PASS
-    email: $$DOCKER_EMAIL
+- name: publish
+  image: plugins/docker:18
+  settings:
+    auto_tag: true
+    auto_tag_suffix: linux-amd64
+    dockerfile: docker/Dockerfile.server.linux.amd64
     repo: drone/drone
-    tag:
-      - "latest" 
-      - "0.4"
-    when:
-      repo: drone/drone
-      branch: master
+    username:
+      from_secret: docker_username
+    password:
+      from_secret: docker_password
+  when:
+    event:
+    - push
+    - tag
+
+---
+kind: pipeline
+type: docker
+name: linux-arm64
+
+platform:
+  arch: arm64
+  os: linux
+
+steps:
+- name: build
+  image: golang:1.13.0
+  commands:
+  - sh scripts/build.sh
+  environment:
+    GOARCH: arm64
+    GOOS: linux
+
+- name: publish
+  image: plugins/docker:18
+  settings:
+    auto_tag: true
+    auto_tag_suffix: linux-arm64
+    dockerfile: docker/Dockerfile.server.linux.arm64
+    repo: drone/drone
+    username:
+      from_secret: docker_username
+    password:
+      from_secret: docker_password
+
+trigger:
+  event:
+  - push
+  - tag
+
+depends_on:
+- linux-amd64
+
+---
+kind: pipeline
+type: docker
+name: linux-arm
+
+platform:
+  arch: arm
+  os: linux
+
+steps:
+- name: build
+  image: golang:1.13.0
+  commands:
+  - sh scripts/build.sh
+  environment:
+    GOARCH: arm
+    GOOS: linux
+
+- name: publish
+  image: plugins/docker:18
+  settings:
+    auto_tag: true
+    auto_tag_suffix: linux-arm
+    dockerfile: docker/Dockerfile.server.linux.arm
+    repo: drone/drone
+    username:
+      from_secret: docker_username
+    password:
+      from_secret: docker_password
+
+trigger:
+  event:
+  - push
+  - tag
+
+depends_on:
+- linux-amd64
+
+---
+kind: pipeline
+type: docker
+name: manifest
+
+steps:
+- name: publish
+  image: plugins/manifest:1.2
+  settings:
+    auto_tag: true
+    ignore_missing: true
+    spec: docker/manifest.server.tmpl
+    username:
+      from_secret: docker_username
+    password:
+      from_secret: docker_password
+
+trigger:
+  event:
+  - push
+  - tag
+
+depends_on:
+- linux-arm64
+- linux-arm
